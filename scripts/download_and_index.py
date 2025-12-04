@@ -1,7 +1,13 @@
 import sys
+import io
 import gzip
 import os
 from pathlib import Path
+
+# Fix Windows encoding issues with emojis
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 # Add the scripts directory to the path for imports
 script_dir = Path(__file__).parent
