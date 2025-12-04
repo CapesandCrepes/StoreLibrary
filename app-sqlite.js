@@ -112,19 +112,61 @@ async function initializeDatabase(settings) {
     });
 
     const isDev = /^(localhost|127\\.0\\.0\\.1)$/.test(location.hostname);
-    // Use existing CORS proxy host
-    const dbUrl = isDev ? './gamecache.sqlite.gz' :
-      `https://cors-proxy.mybgg.workers.dev/${settings.github.repo}`;
-
-    console.log(`Loading database from: ${dbUrl}`);
-
-    let response = await fetch(dbUrl);
-    if (!response.ok && isDev) {
-      // In development, fall back to the legacy local artifact name
-      const legacyDbUrl = './mybgg.sqlite.gz';
-      console.warn(`Primary database URL failed (${dbUrl}), trying legacy local file: ${legacyDbUrl}`);
-      response = await fetch(legacyDbUrl);
+    
+    let response;
+    let dbUrl;
+    
+    if (isDev) {
+      // Development: use local file
+      dbUrl = './gamecache.sqlite.gz';
+      console.log(`Loading database from: ${dbUrl}`);
+      response = await fetch(dbUrl);
+      if (!response.ok) {
+        // Fall back to legacy local artifact name
+        const legacyDbUrl = './mybgg.sqlite.gz';
+        console.warn(`Primary database URL failed (${dbUrl}), trying legacy local file: ${legacyDbUrl}`);
+        response = await fetch(legacyDbUrl);
+      }
+    } else {
+      // Production: try multiple CORS proxy URL formats
+      const githubReleasesUrl = `https://github.com/${settings.github.repo}/releases/latest/download/gamecache.sqlite.gz`;
+      
+      // Try different URL formats (proxy and direct)
+      const urlFormats = [
+        // Format 1: Query parameter (standard CORS proxy format)
+        `https://cors-proxy.mybgg.workers.dev/?url=${encodeURIComponent(githubReleasesUrl)}`,
+        // Format 2: Path with encoded full URL
+        `https://cors-proxy.mybgg.workers.dev/${encodeURIComponent(githubReleasesUrl)}`,
+        // Format 3: Original format - just repo name (proxy constructs URL)
+        `https://cors-proxy.mybgg.workers.dev/${settings.github.repo}`,
+        // Format 4: Direct GitHub URL (GitHub releases usually allow CORS)
+        githubReleasesUrl,
+      ];
+      
+      let lastError;
+      for (const url of urlFormats) {
+        try {
+          console.log(`Trying database URL: ${url}`);
+          response = await fetch(url);
+          if (response.ok) {
+            dbUrl = url;
+            console.log(`Successfully loaded database from: ${dbUrl}`);
+            break;
+          } else {
+            lastError = `HTTP ${response.status}: ${response.statusText}`;
+            console.warn(`Failed with ${lastError}, trying next format...`);
+          }
+        } catch (err) {
+          lastError = err.message;
+          console.warn(`Failed with error: ${lastError}, trying next format...`);
+        }
+      }
+      
+      if (!response || !response.ok) {
+        throw new Error(`Failed to fetch database after trying all URL formats. Last error: ${lastError}`);
+      }
     }
+    
     if (!response.ok) {
       throw new Error(`Failed to fetch database: ${response.status} ${response.statusText}`);
     }

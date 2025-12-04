@@ -35,8 +35,9 @@ def check_website():
 
     repo = config["github_repo"]
     username = repo.split("/")[0]
+    repo_name = repo.split("/")[1] if "/" in repo else "gamecache"
 
-    website_url = f"https://{username}.github.io/gamecache"
+    website_url = f"https://{username}.github.io/{repo_name}"
 
     print(f"🔍 Checking website: {website_url}")
 

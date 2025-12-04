@@ -4,15 +4,21 @@ Simple validation script to check if setup is correct before running the main sc
 """
 
 import sys
+import io
 from pathlib import Path
 from urllib.parse import unquote
+
+# Fix Windows encoding issues with emojis
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 # Add the scripts directory to the path so we can import gamecache modules
 script_dir = Path(__file__).parent
 sys.path.insert(0, str(script_dir))
 
 # Now import after path is set
-from gamecache.config import parse_config_file  # noqa: E402
+from gamecache.config import parse_config_file, create_nested_config  # noqa: E402
 from gamecache.http_client import make_http_request  # noqa: E402
 
 def validate_config():
@@ -55,26 +61,31 @@ def validate_config():
     print("✅ config.ini looks good!")
 
     # Convert flat config to nested structure for compatibility with other functions
-    nested_config = {
-        "project": {"title": config["title"]},
-        "boardgamegeek": {"user_name": config["bgg_username"]},
-        "github": {"repo": config["github_repo"]}
-    }
+    # This also loads the BGG token from .env file
+    nested_config = create_nested_config(config)
     return True, nested_config
 
-def validate_bgg_user(username):
+def validate_bgg_user(username, token=None):
     """Check if BGG username exists and has a public collection"""
     print(f"🔍 Checking BGG user '{username}'...")
     safe_username = unquote(username)
 
+    # Prepare headers with authentication if token is available
+    headers = {}
+    if token:
+        headers['Authorization'] = f'Bearer {token}'
+    elif not token:
+        print("⚠️  No BGG token found. Some endpoints may require authentication.")
+        print("   Create a .env file with: GAMECACHE_BGG_TOKEN=your_token")
+
     try:
         # Check user exists
         url = "https://boardgamegeek.com/xmlapi2/user"
-        response = make_http_request(url, params={"name": safe_username}, timeout=10)
+        response = make_http_request(url, params={"name": safe_username}, timeout=10, headers=headers if headers else None)
 
         # Check collection exists and is public
         url = "https://boardgamegeek.com/xmlapi2/collection"
-        response = make_http_request(url, params={"username": safe_username, "own": 1}, timeout=10)
+        response = make_http_request(url, params={"username": safe_username, "own": 1}, timeout=10, headers=headers if headers else None)
 
         # Basic check for collection content
         if b"<item " in response:
@@ -162,7 +173,8 @@ def main():
     # Validate BGG user
     if config_valid:
         bgg_username = config["boardgamegeek"]["user_name"]
-        all_good &= validate_bgg_user(bgg_username)
+        bgg_token = config["boardgamegeek"].get("token")
+        all_good &= validate_bgg_user(bgg_username, bgg_token)
 
     print("\n" + "=" * 50)
 
